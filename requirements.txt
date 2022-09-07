@@ -1,0 +1,6 @@
+aws-cdk-lib==2.40.0
+virtualenv==20.16.4
+constructs>=10.0.0,<11.0.0
+chalice==1.27.3
+chalice[cdkv2]==1.27.3
+boto3<2.0.0
