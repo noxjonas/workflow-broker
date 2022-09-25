@@ -1,0 +1,11 @@
+{
+  "parameters": {
+    "values": [1, 2, 3]
+  },
+  "meta": {
+    "user": "jonas.kondr@gmail.com",
+    "broker": "aws.lambda",
+    "workflow": "calculus.sum",
+    "wait_until": 1663469926
+  }
+}

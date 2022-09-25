@@ -11,7 +11,7 @@ from chalice.cdk import Chalice
 
 
 RUNTIME_SOURCE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), os.pardir, 'runtime')
+    os.path.dirname(os.path.dirname(__file__)), os.pardir, 'api', 'runtime')
 
 
 class ChaliceApp(cdk.Stack):
