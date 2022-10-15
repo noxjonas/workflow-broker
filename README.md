@@ -71,3 +71,18 @@ command.
 * `cdk docs`        open CDK documentation
 
 Enjoy!
+
+
+# Dev
+
+```commandline
+python -m venv .venv
+python -m pip install -r requirements.txt
+
+aws s3 cp ./input_test.json s3://workflowbroker-inputbucket3bf8630a-tq0dhr6i0pl5/12515351
+
+
+cdk deploy WorkflowBroker --require-approval never
+cdk deploy DummyWorkflow --require-approval never
+
+```

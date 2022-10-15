@@ -6,84 +6,97 @@ from aws_cdk import (
     aws_apigateway as apigw,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as tasks,
-    aws_iam as iam
+    aws_iam as iam,
+    aws_s3 as s3,
+    aws_sns as sns,
+    aws_s3_notifications as s3n,
+    aws_dynamodb as dynamodb,
+    aws_logs as logs,
+    aws_sns_subscriptions as subscriptions,
+    aws_lambda_event_sources as lambda_event_sources,
 )
 import aws_cdk as cdk
 from constructs import Construct
 
 
-class AppStack(Stack):
-
+class BrokerStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # The code that defines your stack goes here
+        self.queues = []
 
-        # # example resource
-        # queue = sqs.Queue(
-        #     self, "DeployQueue",
-        #     visibility_timeout=Duration.seconds(300),
-        # )
+        self.trigger_topic = sns.Topic(self, "TriggerTopic")
 
-        # Defines an AWS Lambda resource
-        my_lambda = _lambda.Function(
-            self, 'MyLambda',
+        self.bucket = s3.Bucket(
+            self,
+            "InputBucket",
+            enforce_ssl=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        self.table = dynamodb.Table(
+            self,
+            "WorkflowTable",
+            partition_key=dynamodb.Attribute(
+                name="user_id#workflow_id", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="workflow#id", type=dynamodb.AttributeType.STRING
+            ),
+            replication_regions=[],
+            billing_mode=dynamodb.BillingMode.PROVISIONED,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        self.table.auto_scale_write_capacity(
+            min_capacity=1, max_capacity=2
+        ).scale_on_utilization(target_utilization_percent=75)
+
+        input_validator_lambda = _lambda.Function(
+            self,
+            "InputValidatorLambda",
             runtime=_lambda.Runtime.PYTHON_3_9,
-            code=_lambda.Code.from_asset('core'),
-            handler='handlers.hello',
+            code=_lambda.Code.from_asset("lambdas"),
+            handler="handlers.validate",
+            environment={"WORKFLOW_TABLE": self.table.table_name},
+            log_retention=logs.RetentionDays.THREE_DAYS,
         )
 
-        pre_run_hook_lambda = _lambda.Function(
-            self, 'PreRunHookLambda',
+        self.table.grant_write_data(input_validator_lambda)
+
+        self.bucket.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.LambdaDestination(input_validator_lambda)
+            # could add filters here
+        )
+        self.bucket.grant_read(input_validator_lambda)
+
+        publish_to_sns_lambda = _lambda.Function(
+            self,
+            "PublishToSnsLambda",
             runtime=_lambda.Runtime.PYTHON_3_9,
-            code=_lambda.Code.from_asset('core'),
-            handler='pre_run_hook.handler',
+            code=_lambda.Code.from_asset("lambdas"),
+            handler="handlers.publish_to_sns",
+            environment={"SNS_TOPIC_ARN": self.trigger_topic.topic_arn},
+            log_retention=logs.RetentionDays.THREE_DAYS,
         )
-
-        execute_job_lambda = _lambda.Function(
-            self, 'ExecuteJobLambda',
-            runtime=_lambda.Runtime.PYTHON_3_9,
-            code=_lambda.Code.from_asset('core'),
-            handler='handlers.execute_job',
-        )
-
-        execute_job_lambda.add_to_role_policy(iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=[
-                'lambda:InvokeFunction',
-            ],
-            resources=[
-                'arn:aws:lambda:eu-central-1:852354451651:function:calc-sum-lambda',
-            ],
-        ))
-
-        state_machine = sfn.StateMachine(
-            self, "WorkflowBrokerStateMachine",
-            definition=sfn.Chain
-            .start(
-                tasks.LambdaInvoke(
-                    self, "MyLambdaTask",
-                    lambda_function=my_lambda
-                )
-            )
-            .next(
-                sfn.Wait(self, "random wait 1s", time=sfn.WaitTime.duration(cdk.Duration.seconds(1)))
-            )
-            .next(
-                tasks.LambdaInvoke(
-                    self, "PreRunTask",
-                    lambda_function=pre_run_hook_lambda,
-                    input_path="$.Payload",
-                )
-            ).next(
-                tasks.LambdaInvoke(
-                    self, "RunTask",
-                    lambda_function=execute_job_lambda,
-                    input_path="$.Payload",
-                )
-            )
-            .next(
-                sfn.Succeed(self, "GreetedWorld")
+        publish_to_sns_lambda.add_event_source(
+            lambda_event_sources.DynamoEventSource(
+                self.table,
+                starting_position=_lambda.StartingPosition.TRIM_HORIZON,
+                batch_size=5,
+                bisect_batch_on_error=True,
+                # on_failure=SqsDlq(dead_letter_queue),
             )
         )
 
+        self.trigger_topic.grant_publish(publish_to_sns_lambda)
+
+    def get_queue(self, name: str):
+        queue = sqs.Queue(self, name)
+        self.queues.append(queue)
+
+        self.trigger_topic.add_subscription(
+            subscription=subscriptions.SqsSubscription(queue)
+        )
+        return queue
