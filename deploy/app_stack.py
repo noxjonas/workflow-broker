@@ -18,6 +18,8 @@ from aws_cdk import (
 import aws_cdk as cdk
 from constructs import Construct
 
+from deploy.api.infrastructure.chaliceapp import ChaliceApp
+
 
 class BrokerStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -92,11 +94,21 @@ class BrokerStack(Stack):
 
         self.trigger_topic.grant_publish(publish_to_sns_lambda)
 
-    def get_queue(self, name: str):
-        queue = sqs.Queue(self, name)
+        self.api = ChaliceApp(
+            self,
+            # self,
+            # "api",
+            broker_table=self.table,
+            broker_bucket=self.bucket,
+            broker_queues=self.queues,
+        )
+
+    def get_queue(self, workflow_name: str):
+        queue = sqs.Queue(self, f"{workflow_name}Queue")
         self.queues.append(queue)
 
-        self.trigger_topic.add_subscription(
-            subscription=subscriptions.SqsSubscription(queue)
-        )
+        self.trigger_topic.add_subscription(subscriptions.SqsSubscription(queue))
         return queue
+
+    def register_workflows(self):
+        pass

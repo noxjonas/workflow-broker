@@ -4,7 +4,6 @@ import os
 import aws_cdk as cdk
 
 from deploy.app_stack import BrokerStack
-from api.infrastructure.chaliceapp import ChaliceApp
 import json
 
 from deploy.dummy_workflow import DummyWorkflow
@@ -27,22 +26,14 @@ broker = BrokerStack(
 DummyWorkflow(
     app,
     "DummyWorkflow",
-    queue=broker.get_queue("DummyWorkflowQueue"),
+    queue=broker.get_queue(workflow_name="DummyWorkflow"),
     env=cdk.Environment(
         account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION")
     ),
 )
 
-
-ChaliceApp(
-    app,
-    "api",
-    broker_table=broker.table,
-    broker_bucket=broker.bucket,
-    broker_queues=broker.queues,
-    env=cdk.Environment(
-        account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION")
-    ),
-)
+# does nothing atm. api will have to be aware of the queues available
+#   put into table/ ssm parameter? but how will the app be aware of deleted queue? cross-check with SQS?
+broker.register_workflows()
 
 app.synth()

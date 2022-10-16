@@ -3,7 +3,7 @@ import boto3
 from chalice import Chalice, CORSConfig, CognitoUserPoolAuthorizer
 import json
 
-app = Chalice(app_name="api")
+app = Chalice(app_name="WorkflowBroker-api")
 # dynamodb = boto3.resource("dynamodb")
 # dynamodb_table = dynamodb.Table(os.environ.get("APP_TABLE_NAME", ""))
 
@@ -23,7 +23,7 @@ authorizer = CognitoUserPoolAuthorizer(
 def test():
     for k, v in os.environ.items():
         print(f"{k}: {v}")
-    return json.dumps(os.environ)
+    return json.dumps(os.environ['BROKER_QUEUES_NAMES_JSON'])
 
 
 #

@@ -1,15 +1,15 @@
 {
   "version": "2.0",
-  "app_name": "api",
+  "app_name": "WorkflowBroker-api",
   "stages": {
     "dev": {
-      "api_gateway_stage": "api",
+      "api_gateway_stage": "dev",
       "lambda_functions": {
         "api_handler": {
           "environment_variables": {
-            "APP_TABLE_NAME": ""
-	  }
-	}
+            "PLACE_HOLDER_ENV_VAR": ""
+          }
+        }
       }
     }
   }

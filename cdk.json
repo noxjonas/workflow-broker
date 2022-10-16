@@ -16,12 +16,14 @@
   },
   "context": {
     "dev": {
-      "ApiDomain": "api-dev.noxide.xyz",
+      "RestAPIStage": "dev",
+      "ApiDomain": "api-workflow-broker.noxide.xyz",
       "DomainName": "noxide.xyz",
       "DomainCertificateArn": "arn:aws:acm:eu-central-1:852354451651:certificate/7d00bd6d-ed54-41db-8f2b-1ba860c057a7"
     },
     "prod": {
-      "ApiDomain": "api-prod.noxide.xyz",
+      "RestAPIStage": "prod",
+      "ApiDomain": "api-workflow-broker.noxide.xyz",
       "DomainName": "noxide.xyz",
       "DomainCertificateArn": "arn:aws:acm:eu-central-1:852354451651:certificate/7d00bd6d-ed54-41db-8f2b-1ba860c057a7"
     },

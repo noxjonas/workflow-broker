@@ -32,33 +32,33 @@ RUNTIME_SOURCE_DIR = os.path.join(
 )
 
 
-class ChaliceApp(cdk.Stack):
+class ChaliceApp:
     def __init__(
         self,
-        scope,
-        _id,
+        stack,
+        *,
+        # scope,
+        # _id,
         broker_table: dynamodb.Table,
         broker_bucket: s3.Bucket,
         broker_queues: list[sqs.IQueue],
         **kwargs
     ):
-        super().__init__(scope, _id, **kwargs)
+        # super().__init__(scope, _id, **kwargs)
+        self.stack = stack
 
-        stage_config = self.node.try_get_context("CONFIG")
-
-        self.hosted_zone = route53.HostedZone.from_lookup(
-            self, "baseZone", domain_name=stage_config["DomainName"]
-        )
+        stage_config = stack.node.try_get_context("CONFIG")
 
         self._cognito_setup()
 
         # self.dynamodb_table = self._create_ddb_table()
         self.chalice = Chalice(
-            self,
+            stack,
             "ChaliceApp",
             source_dir=RUNTIME_SOURCE_DIR,
             stage_config={
                 "api_gateway_endpoint_type": "REGIONAL",
+                "api_gateway_stage": stage_config["RestAPIStage"],  # TODO: I'm not sure this has any effect
                 "api_gateway_custom_domain": {
                     "domain_name": stage_config["ApiDomain"],
                     "certificate_arn": stage_config["DomainCertificateArn"],
@@ -75,17 +75,26 @@ class ChaliceApp(cdk.Stack):
             },
         )
 
-        # # grant access to broker resources
-        # chalice_role = self.chalice.get_role("DefaultRole")
-        # broker_bucket.grant_read_write(chalice_role)
-        # broker_table.grant_read_write_data(chalice_role)
+        # self.chalice.node.add_dependency(self.hosted_zone)
+
+        # grant access to broker resources
+        chalice_role = self.chalice.get_role("DefaultRole")
+        broker_bucket.grant_read_write(chalice_role)
+        broker_table.grant_read_write_data(chalice_role)
         # for queue in broker_queues:
         #     queue.grant_send_messages(chalice_role)
 
+
+        # TODO: follow https://github.com/aws/chalice/issues/1640
+        #   there's a race condition, but was unable to find a way to reference RestAPI.Stage dependency
+        #   also, neither of the commits in https://github.com/aws/chalice/issues/1735 work
+        self.hosted_zone = route53.HostedZone.from_lookup(
+            stack, "baseZone", domain_name=stage_config["DomainName"]
+        )
         self.custom_domain = self.chalice.get_resource("ApiGatewayCustomDomain")
         self.a_record = route53.CfnRecordSet(
-            self,
-            "a-record-id",
+            stack,
+            "WorkflowBrokerApiARecord",
             hosted_zone_id=self.hosted_zone.hosted_zone_id,
             name=stage_config["ApiDomain"],
             type="A",
@@ -98,11 +107,11 @@ class ChaliceApp(cdk.Stack):
             ),
         )
 
-        cdk.CfnOutput(self, "ApiCustomEndpoint", value=stage_config["ApiDomain"])
+        cdk.CfnOutput(stack, "ApiCustomEndpoint", value=stage_config["ApiDomain"])
 
     def _cognito_setup(self):
         self.user_pool = cognito.UserPool(
-            self,
+            self.stack,
             "WorkflowBroker",
             self_sign_up_enabled=True,
             user_verification=cognito.UserVerificationConfig(
@@ -113,6 +122,14 @@ class ChaliceApp(cdk.Stack):
             ),
             sign_in_aliases=cognito.SignInAliases(username=True, email=True),
         )
+
+        user_pool_domain = self.user_pool.add_domain(
+            "CognitoDomain",
+            cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix="workflow-broker"
+            )
+        )
+        cdk.CfnOutput(self.stack, "UserPoolDomain", value=f"https://{user_pool_domain.domain_name}.auth.eu-central-1.amazoncognito.com")
 
         self.app_client = self.user_pool.add_client(
             "default",
@@ -131,6 +148,7 @@ class ChaliceApp(cdk.Stack):
             id_token_validity=Duration.minutes(60),
             refresh_token_validity=Duration.days(30),
         )
+        cdk.CfnOutput(self.stack, "defaultAppClientId", value=self.app_client.user_pool_client_id)
 
     # def _create_ddb_table(self):
     #     dynamodb_table = dynamodb.Table(
