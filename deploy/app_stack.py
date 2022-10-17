@@ -14,10 +14,10 @@ from aws_cdk import (
     aws_logs as logs,
     aws_sns_subscriptions as subscriptions,
     aws_lambda_event_sources as lambda_event_sources,
+    aws_lambda_python_alpha as lambda_python,
 )
 import aws_cdk as cdk
 from constructs import Construct
-
 from deploy.api.infrastructure.chaliceapp import ChaliceApp
 
 
@@ -40,11 +40,14 @@ class BrokerStack(Stack):
             self,
             "WorkflowTable",
             partition_key=dynamodb.Attribute(
-                name="user_id#workflow_id", type=dynamodb.AttributeType.STRING
+                # submission_id?
+                name="user_id#workflow_id",
+                type=dynamodb.AttributeType.STRING,
             ),
             sort_key=dynamodb.Attribute(
                 name="workflow#id", type=dynamodb.AttributeType.STRING
             ),
+            time_to_live_attribute="ttl",
             replication_regions=[],
             billing_mode=dynamodb.BillingMode.PROVISIONED,
             removal_policy=cdk.RemovalPolicy.DESTROY,
@@ -54,13 +57,17 @@ class BrokerStack(Stack):
             min_capacity=1, max_capacity=2
         ).scale_on_utilization(target_utilization_percent=75)
 
-        input_validator_lambda = _lambda.Function(
+        input_validator_lambda = lambda_python.PythonFunction(
             self,
             "InputValidatorLambda",
+            entry="lambdas/",
             runtime=_lambda.Runtime.PYTHON_3_9,
-            code=_lambda.Code.from_asset("lambdas"),
-            handler="handlers.validate",
-            environment={"WORKFLOW_TABLE": self.table.table_name},
+            handler="handler",
+            index="validator.py",
+            environment={
+                "WORKFLOW_TABLE": self.table.table_name,
+                "LOG_LEVEL": "INFO",
+            },
             log_retention=logs.RetentionDays.THREE_DAYS,
         )
 
@@ -78,8 +85,11 @@ class BrokerStack(Stack):
             "PublishToSnsLambda",
             runtime=_lambda.Runtime.PYTHON_3_9,
             code=_lambda.Code.from_asset("lambdas"),
-            handler="handlers.publish_to_sns",
-            environment={"SNS_TOPIC_ARN": self.trigger_topic.topic_arn},
+            handler="publisher.handler",
+            environment={
+                "SNS_TOPIC_ARN": self.trigger_topic.topic_arn,
+                "LOG_LEVEL": "INFO",
+            },
             log_retention=logs.RetentionDays.THREE_DAYS,
         )
         publish_to_sns_lambda.add_event_source(
@@ -88,6 +98,22 @@ class BrokerStack(Stack):
                 starting_position=_lambda.StartingPosition.TRIM_HORIZON,
                 batch_size=5,
                 bisect_batch_on_error=True,
+                filters=[
+                    _lambda.FilterCriteria.filter(
+                        {
+                            "eventName": ["MODIFY"],
+                            "dynamodb": {
+                                "Keys": {"workflow#id": {"S": ["submission#0"]}},
+                                "OldImage": {
+                                    "is_valid": {
+                                        "BOOL": _lambda.FilterRule.not_exists()
+                                    }
+                                },
+                                "NewImage": {"is_valid": {"BOOL": [True]}},
+                            },
+                        }
+                    )
+                ],
                 # on_failure=SqsDlq(dead_letter_queue),
             )
         )
@@ -96,8 +122,6 @@ class BrokerStack(Stack):
 
         self.api = ChaliceApp(
             self,
-            # self,
-            # "api",
             broker_table=self.table,
             broker_bucket=self.bucket,
             broker_queues=self.queues,
